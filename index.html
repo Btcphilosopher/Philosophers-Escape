@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Philosopher vs The System</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: white;
+            font-family: 'Courier New', monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .hud {
+            display: flex;
+            justify-content: space-between;
+            width: 600px;
+            margin-bottom: 10px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .level-info {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #ffff00;
+        }
+
+        canvas {
+            border: 3px solid #00f;
+            background: #000;
+        }
+
+        .controls {
+            margin-top: 15px;
+            text-align: center;
+            font-size: 14px;
+            color: #ccc;
+        }
+
+        .game-over, .level-complete {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 30px;
+            border: 2px solid #ffff00;
+            text-align: center;
+            font-size: 18px;
+            display: none;
+            z-index: 1000;
+        }
+
+        .game-over button, .level-complete button {
+            margin-top: 15px;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #ffff00;
+            color: #000;
+            border: none;
+            cursor: pointer;
+        }
+
+        .personality-info {
+            font-size: 10px;
+            color: #aaa;
+            margin-top: 10px;
+            max-width: 600px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="hud">
+            <div>Score: <span id="score">0</span></div>
+            <div>Level: <span id="level">1</span></div>
+            <div>Lives: <span id="lives">3</span></div>
+        </div>
+        
+        <div class="level-info">
+            <div id="background-name">HMRC Office</div>
+            <div id="background-desc">The most efficient and ruthless pursuit</div>
+            <div style="font-size: 12px; color: #888; margin-top: 5px;">
+                ♾️ Infinite Game - Backgrounds cycle every 4 levels with increasing challenge!
+            </div>
+        </div>
+
+        <canvas id="gameCanvas" width="600" height="600"></canvas>
+        
+        <div class="controls">
+            Use ARROW KEYS to move • Collect wisdom dots • Avoid the pursuers!
+        </div>
+
+        <div class="personality-info" id="personality-info">
+            Tax Man: Methodically pursues • Politician: Changes direction unpredictably • Police: Direct pursuit • Socialist: Coordinated movement
+        </div>
+    </div>
+
+    <div class="game-over" id="gameOver">
+        <h2>Game Over!</h2>
+        <p>The system caught up with you...</p>
+        <p>Final Score: <span id="finalScore">0</span></p>
+        <button onclick="restartGame()">Try Again</button>
+    </div>
+
+    <div class="level-complete" id="levelComplete">
+        <h2>Level Complete!</h2>
+        <p>Your philosophical wisdom prevails!</p>
+        <button onclick="nextLevel()">Continue</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        let gameState = {
+            score: 0,
+            level: 1,
+            lives: 3,
+            gameRunning: true
+        };
+
+        const TILE_SIZE = 20;
+        const ROWS = 30;
+        const COLS = 30;
+
+        // Maze layout (1 = wall, 0 = path, 2 = wisdom dot)
+        let maze = [];
+        let wisdomDots = [];
+
+        // Game entities
+        let philosopher = { x: 14, y: 23, direction: 0 };
+        let pursuers = [];
+
+        // Background themes with detailed descriptions
+        const backgrounds = [
+            { 
+                name: "HMRC Office", 
+                desc: "The most efficient and ruthless pursuit - nowhere to hide from taxation",
+                color: "#2d4a2d" 
+            },
+            { 
+                name: "Police Station", 
+                desc: "Tight corridors where authority coordinates their pursuit",
+                color: "#2d2d4a" 
+            },
+            { 
+                name: "Parliament", 
+                desc: "A bewildering labyrinth of political complexity and confusion",
+                color: "#4a2d2d" 
+            },
+            { 
+                name: "Public Sector", 
+                desc: "Bureaucratic maze filled with dead ends and inefficiency",
+                color: "#4a4a2d" 
+            }
+        ];
+
+        // Pursuer types with personalities
+        const pursuerTypes = [
+            { 
+                name: "Tax Man", 
+                color: "#00ff00", 
+                personality: "methodical"
+            },
+            { 
+                name: "Politician", 
+                color: "#ff0000", 
+                personality: "unpredictable"
+            },
+            { 
+                name: "Police", 
+                color: "#0000ff", 
+                personality: "aggressive"
+            },
+            { 
+                name: "Socialist", 
+                color: "#ffff00", 
+                personality: "coordinated"
+            }
+        ];
+
+        function initializeMaze() {
+            maze = [];
+            wisdomDots = [];
+            
+            const bgIndex = Math.floor((gameState.level - 1) / 4) % backgrounds.length;
+            
+            // Initialize empty maze
+            for (let row = 0; row < ROWS; row++) {
+                maze[row] = [];
+                for (let col = 0; col < COLS; col++) {
+                    maze[row][col] = 0;
+                }
+            }
+            
+            // Create borders
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    if (row === 0 || row === ROWS - 1 || col === 0 || col === COLS - 1) {
+                        maze[row][col] = 1;
+                    }
+                }
+            }
+            
+            // Create maze based on level type
+            switch(bgIndex) {
+                case 0: // HMRC - Clean, efficient grid
+                    createHMRCMaze();
+                    break;
+                case 1: // Police Station - Tight corridors
+                    createPoliceStationMaze();
+                    break;
+                case 2: // Parliament - Labyrinthine
+                    createParliamentMaze();
+                    break;
+                case 3: // Public Sector - Many dead ends
+                    createPublicSectorMaze();
+                    break;
+            }
+            
+            // Add wisdom dots to empty spaces
+            for (let row = 1; row < ROWS - 1; row++) {
+                for (let col = 1; col < COLS - 1; col++) {
+                    if (maze[row][col] === 0) {
+                        maze[row][col] = 2;
+                        wisdomDots.push({ x: col, y: row });
+                    }
+                }
+            }
+
+            // Clear starting areas
+            philosopher.x = 14;
+            philosopher.y = 23;
+            clearArea(philosopher.x, philosopher.y, 1);
+            clearArea(14, 11, 2); // Pursuer spawn area
+        }
+
+        function clearArea(centerX, centerY, radius) {
+            for (let y = centerY - radius; y <= centerY + radius; y++) {
+                for (let x = centerX - radius; x <= centerX + radius; x++) {
+                    if (x >= 0 && x < COLS && y >= 0 && y < ROWS) {
+                        maze[y][x] = 0;
+                        wisdomDots = wisdomDots.filter(dot => !(dot.x === x && dot.y === y));
+                    }
+                }
+            }
+        }
+
+        function createHMRCMaze() {
+            // Clean, efficient grid - minimal obstacles
+            for (let row = 4; row < ROWS - 4; row += 8) {
+                for (let col = 4; col < COLS - 4; col += 8) {
+                    maze[row][col] = 1;
+                    maze[row][col + 1] = 1;
+                    maze[row + 1][col] = 1;
+                    maze[row + 1][col + 1] = 1;
+                }
+            }
+        }
+
+        function createPoliceStationMaze() {
+            // Tight corridors
+            for (let row = 3; row < ROWS - 3; row += 6) {
+                for (let col = 2; col < COLS - 2; col++) {
+                    if (col % 6 !== 0) {
+                        maze[row][col] = 1;
+                    }
+                }
+            }
+        }
+
+        function createParliamentMaze() {
+            // Complex labyrinth
+            for (let row = 2; row < ROWS - 2; row += 4) {
+                for (let col = 2; col < COLS - 2; col += 4) {
+                    maze[row][col] = 1;
+                    maze[row][col + 1] = 1;
+                    maze[row + 1][col] = 1;
+                }
+            }
+            
+            // Add complexity
+            for (let row = 5; row < ROWS - 5; row += 8) {
+                for (let col = 5; col < COLS - 5; col += 8) {
+                    for (let i = 0; i < 2; i++) {
+                        for (let j = 0; j < 2; j++) {
+                            maze[row + i][col + j] = 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        function createPublicSectorMaze() {
+            // Many dead ends
+            for (let row = 2; row < ROWS - 2; row += 3) {
+                for (let col = 2; col < COLS - 2; col += 5) {
+                    maze[row][col] = 1;
+                    maze[row][col + 1] = 1;
+                    
+                    // Dead end branches
+                    if (Math.random() > 0.5) {
+                        maze[row - 1][col] = 1;
+                    }
+                    if (Math.random() > 0.5) {
+                        maze[row + 1][col] = 1;
+                    }
+                }
+            }
+        }
+
+        function initializePursuers() {
+            pursuers = [];
+            const startPositions = [
+                { x: 14, y: 11 },
+                { x: 13, y: 11 },
+                { x: 15, y: 11 },
+                { x: 14, y: 10 }
+            ];
+
+            for (let i = 0; i < 4; i++) {
+                pursuers.push({
+                    x: startPositions[i].x,
+                    y: startPositions[i].y,
+                    type: pursuerTypes[i],
+                    direction: Math.floor(Math.random() * 4),
+                    moveTimer: 0,
+                    personalityTimer: 0
+                });
+            }
+        }
+
+        function updateBackground() {
+            const bgIndex = Math.floor((gameState.level - 1) / 4) % backgrounds.length;
+            const bg = backgrounds[bgIndex];
+            
+            document.getElementById('background-name').textContent = bg.name;
+            document.getElementById('background-desc').textContent = bg.desc;
+            canvas.style.backgroundColor = bg.color;
+        }
+
+        function drawMaze() {
+            ctx.fillStyle = '#0000ff';
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    if (maze[row][col] === 1) {
+                        ctx.fillRect(col * TILE_SIZE, row * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+                    }
+                }
+            }
+
+            // Draw wisdom dots
+            ctx.fillStyle = '#ffffff';
+            wisdomDots.forEach(dot => {
+                ctx.beginPath();
+                ctx.arc(dot.x * TILE_SIZE + TILE_SIZE/2, dot.y * TILE_SIZE + TILE_SIZE/2, 3, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function drawPhilosopher() {
+            ctx.fillStyle = '#ffff00';
+            ctx.beginPath();
+            ctx.arc(philosopher.x * TILE_SIZE + TILE_SIZE/2, philosopher.y * TILE_SIZE + TILE_SIZE/2, TILE_SIZE/2 - 2, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw thinking bubble
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(philosopher.x * TILE_SIZE + TILE_SIZE - 5, philosopher.y * TILE_SIZE + 5, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        function drawPursuers() {
+            pursuers.forEach(pursuer => {
+                ctx.fillStyle = pursuer.type.color;
+                ctx.fillRect(pursuer.x * TILE_SIZE + 2, pursuer.y * TILE_SIZE + 2, TILE_SIZE - 4, TILE_SIZE - 4);
+                
+                // Draw eyes
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(pursuer.x * TILE_SIZE + 6, pursuer.y * TILE_SIZE + 6, 3, 3);
+                ctx.fillRect(pursuer.x * TILE_SIZE + 11, pursuer.y * TILE_SIZE + 6, 3, 3);
+            });
+        }
+
+        function isValidMove(x, y) {
+            return x >= 0 && x < COLS && y >= 0 && y < ROWS && maze[y][x] !== 1;
+        }
+
+        function movePursuers() {
+            const bgIndex = Math.floor((gameState.level - 1) / 4) % backgrounds.length;
+            
+            pursuers.forEach(pursuer => {
+                pursuer.moveTimer++;
+                pursuer.personalityTimer++;
+
+                // Easier speeds - made even slower
+                let speedThreshold = 45; // Even slower base speed
+                
+                switch(bgIndex) {
+                    case 0: // HMRC - fastest but still easier
+                        speedThreshold = 30;
+                        break;
+                    case 1: // Police Station
+                        speedThreshold = 38;
+                        break;
+                    case 2: // Parliament - very slow in labyrinth
+                        speedThreshold = 55;
+                        break;
+                    case 3: // Public Sector
+                        speedThreshold = 45;
+                        break;
+                }
+
+                // Gradual speed increase every 4 levels (but cap it so it doesn't get impossible)
+                const speedBonus = Math.min(Math.floor(gameState.level / 4) * 2, 15);
+                speedThreshold = Math.max(speedThreshold - speedBonus, 8);
+
+                if (pursuer.moveTimer < speedThreshold) return;
+                pursuer.moveTimer = 0;
+
+                let newX = pursuer.x;
+                let newY = pursuer.y;
+
+                // Improved AI with pathfinding and smarter decision making
+                const dx = philosopher.x - pursuer.x;
+                const dy = philosopher.y - pursuer.y;
+                const distance = Math.abs(dx) + Math.abs(dy);
+
+                // Get possible moves
+                const possibleMoves = [];
+                const directions = [
+                    { x: 0, y: -1, name: 'up' },
+                    { x: 1, y: 0, name: 'right' },
+                    { x: 0, y: 1, name: 'down' },
+                    { x: -1, y: 0, name: 'left' }
+                ];
+
+                directions.forEach(dir => {
+                    const testX = pursuer.x + dir.x;
+                    const testY = pursuer.y + dir.y;
+                    if (isValidMove(testX, testY)) {
+                        const newDistance = Math.abs(philosopher.x - testX) + Math.abs(philosopher.y - testY);
+                        possibleMoves.push({
+                            x: testX,
+                            y: testY,
+                            distance: newDistance,
+                            direction: dir
+                        });
+                    }
+                });
+
+                if (possibleMoves.length === 0) return;
+
+                // Enhanced AI based on personality
+                switch (pursuer.type.personality) {
+                    case 'methodical': // Tax Man - calculated, predictable
+                        pursuer.personalityTimer++;
+                        if (pursuer.personalityTimer % 30 === 0) { // Less frequent recalculation - easier
+                            const bestMove = possibleMoves.reduce((best, move) => 
+                                move.distance < best.distance ? move : best
+                            );
+                            newX = bestMove.x;
+                            newY = bestMove.y;
+                        } else {
+                            // Continue current direction if possible, otherwise pick best
+                            const currentDir = directions[pursuer.direction];
+                            const continueMove = possibleMoves.find(move => 
+                                move.direction.x === currentDir.x && move.direction.y === currentDir.y
+                            );
+                            if (continueMove) {
+                                newX = continueMove.x;
+                                newY = continueMove.y;
+                            } else {
+                                const bestMove = possibleMoves.reduce((best, move) => 
+                                    move.distance < best.distance ? move : best
+                                );
+                                newX = bestMove.x;
+                                newY = bestMove.y;
+                                pursuer.direction = directions.findIndex(dir => 
+                                    dir.x === bestMove.direction.x && dir.y === bestMove.direction.y
+                                );
+                            }
+                        }
+                        break;
+
+                    case 'unpredictable': // Politician - erratic but sometimes smart
+                        pursuer.personalityTimer++;
+                        if (pursuer.personalityTimer % 15 === 0 || Math.random() < 0.4) { // More random, easier
+                            // Random movement or direction change
+                            const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                            newX = randomMove.x;
+                            newY = randomMove.y;
+                            pursuer.direction = directions.findIndex(dir => 
+                                dir.x === randomMove.direction.x && dir.y === randomMove.direction.y
+                            );
+                        } else {
+                            // Sometimes make smart moves
+                            const bestMove = possibleMoves.reduce((best, move) => 
+                                move.distance < best.distance ? move : best
+                            );
+                            newX = bestMove.x;
+                            newY = bestMove.y;
+                        }
+                        break;
+
+                    case 'aggressive': // Police - direct but not perfect
+                        // Sometimes make suboptimal moves to be easier
+                        if (Math.random() < 0.15) { // 15% chance of not taking optimal path
+                            const randomMove = possibleMoves[Math.floor(Math.random() * possibleMoves.length)];
+                            newX = randomMove.x;
+                            newY = randomMove.y;
+                        } else {
+                            // Usually take the most direct path
+                            const bestMove = possibleMoves.reduce((best, move) => 
+                                move.distance < best.distance ? move : best
+                            );
+                            newX = bestMove.x;
+                            newY = bestMove.y;
+                            
+                            // If multiple moves have same distance, prefer horizontal/vertical
+                            const bestMoves = possibleMoves.filter(move => move.distance === bestMove.distance);
+                            if (bestMoves.length > 1) {
+                                const priorityMove = bestMoves.find(move => 
+                                    (Math.abs(dx) > Math.abs(dy) && move.direction.x !== 0) ||
+                                    (Math.abs(dy) > Math.abs(dx) && move.direction.y !== 0)
+                                );
+                                if (priorityMove) {
+                                    newX = priorityMove.x;
+                                    newY = priorityMove.y;
+                                }
+                            }
+                        }
+                        break;
+
+                    case 'coordinated': // Socialist - group coordination
+                        const otherCoordinated = pursuers.filter(p => p.type.personality === 'coordinated' && p !== pursuer);
+                        let coordinationRange = 5;
+                        
+                        if (bgIndex === 1) coordinationRange = 7; // Police station - tighter coordination
+                        
+                        if (otherCoordinated.length > 0) {
+                            const leader = otherCoordinated[0];
+                            const leaderDistance = Math.abs(leader.x - pursuer.x) + Math.abs(leader.y - pursuer.y);
+                            
+                            if (leaderDistance > coordinationRange) {
+                                // Move towards leader to maintain group
+                                const leaderMoves = possibleMoves.map(move => ({
+                                    ...move,
+                                    leaderDistance: Math.abs(leader.x - move.x) + Math.abs(leader.y - move.y)
+                                }));
+                                const bestLeaderMove = leaderMoves.reduce((best, move) => 
+                                    move.leaderDistance < best.leaderDistance ? move : best
+                                );
+                                newX = bestLeaderMove.x;
+                                newY = bestLeaderMove.y;
+                            } else {
+                                // Coordinate attack on philosopher
+                                // Try to approach from different angle than leader
+                                const leaderToPhil = {
+                                    x: philosopher.x - leader.x,
+                                    y: philosopher.y - leader.y
+                                };
+                                
+                                // Find move that approaches philosopher from different side
+                                let bestCoordMove = possibleMoves[0];
+                                let bestScore = -1000;
+                                
+                                possibleMoves.forEach(move => {
+                                    const moveToPhil = {
+                                        x: philosopher.x - move.x,
+                                        y: philosopher.y - move.y
+                                    };
+                                    
+                                    // Score based on getting closer but from different angle
+                                    let score = -move.distance * 2; // Closer is better
+                                    
+                                    // Bonus for flanking (different approach angle than leader)
+                                    const dotProduct = leaderToPhil.x * moveToPhil.x + leaderToPhil.y * moveToPhil.y;
+                                    if (dotProduct < 0) score += 3; // Opposite sides
+                                    
+                                    if (score > bestScore) {
+                                        bestScore = score;
+                                        bestCoordMove = move;
+                                    }
+                                });
+                                
+                                newX = bestCoordMove.x;
+                                newY = bestCoordMove.y;
+                            }
+                        } else {
+                            // No other coordinated pursuers, act like aggressive
+                            const bestMove = possibleMoves.reduce((best, move) => 
+                                move.distance < best.distance ? move : best
+                            );
+                            newX = bestMove.x;
+                            newY = bestMove.y;
+                        }
+                        break;
+                }
+
+                // Update position
+                pursuer.x = newX;
+                pursuer.y = newY;
+            });
+        }
+
+        function checkCollisions() {
+            // Check pursuer collision
+            pursuers.forEach(pursuer => {
+                if (pursuer.x === philosopher.x && pursuer.y === philosopher.y) {
+                    gameState.lives--;
+                    if (gameState.lives <= 0) {
+                        gameOver();
+                    } else {
+                        resetPositions();
+                    }
+                }
+            });
+
+            // Check wisdom dot collection
+            wisdomDots = wisdomDots.filter(dot => {
+                if (dot.x === philosopher.x && dot.y === philosopher.y) {
+                    gameState.score += 10;
+                    return false;
+                }
+                return true;
+            });
+
+            // Check level completion
+            if (wisdomDots.length === 0) {
+                levelComplete();
+            }
+        }
+
+        function resetPositions() {
+            philosopher.x = 14;
+            philosopher.y = 23;
+            initializePursuers();
+        }
+
+        function gameOver() {
+            gameState.gameRunning = false;
+            document.getElementById('finalScore').textContent = gameState.score;
+            document.getElementById('gameOver').style.display = 'block';
+        }
+
+        function levelComplete() {
+            gameState.gameRunning = false;
+            document.getElementById('levelComplete').style.display = 'block';
+        }
+
+        function nextLevel() {
+            gameState.level++;
+            gameState.gameRunning = true;
+            document.getElementById('levelComplete').style.display = 'none';
+            
+            // Bonus points for completing level
+            gameState.score += 100 * gameState.level;
+            
+            initializeMaze();
+            initializePursuers();
+            updateBackground();
+            updateHUD();
+            
+            // The game continues infinitely - backgrounds cycle every 4 levels
+            // Speed gradually increases but caps out so it remains playable
+        }
+
+        function restartGame() {
+            gameState = { score: 0, level: 1, lives: 3, gameRunning: true };
+            document.getElementById('gameOver').style.display = 'none';
+            initializeMaze();
+            initializePursuers();
+            updateBackground();
+            updateHUD();
+        }
+
+        function updateHUD() {
+            document.getElementById('score').textContent = gameState.score;
+            document.getElementById('level').textContent = gameState.level;
+            document.getElementById('lives').textContent = gameState.lives;
+        }
+
+        function gameLoop() {
+            if (!gameState.gameRunning) {
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawMaze();
+            drawPhilosopher();
+            drawPursuers();
+            
+            movePursuers();
+            checkCollisions();
+            updateHUD();
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Controls
+        document.addEventListener('keydown', (e) => {
+            if (!gameState.gameRunning) return;
+            
+            let newX = philosopher.x;
+            let newY = philosopher.y;
+            
+            switch (e.key) {
+                case 'ArrowUp':
+                    newY--;
+                    e.preventDefault();
+                    break;
+                case 'ArrowDown':
+                    newY++;
+                    e.preventDefault();
+                    break;
+                case 'ArrowLeft':
+                    newX--;
+                    e.preventDefault();
+                    break;
+                case 'ArrowRight':
+                    newX++;
+                    e.preventDefault();
+                    break;
+                default:
+                    return;
+            }
+            
+            if (isValidMove(newX, newY)) {
+                philosopher.x = newX;
+                philosopher.y = newY;
+            }
+        });
+
+        // Initialize game
+        initializeMaze();
+        initializePursuers();
+        updateBackground();
+        updateHUD();
+        gameLoop();
+    </script>
+</body>
+</html>
