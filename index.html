@@ -336,21 +336,17 @@
         }
 
         function createPublicSectorMaze() {
-            // Many dead ends
+            // Structured deterministic walls for Public Sector level
             for (let row = 2; row < ROWS - 2; row += 3) {
                 for (let col = 2; col < COLS - 2; col += 5) {
+                    // Create a small wall block of size 2x1
                     maze[row][col] = 1;
-                    maze[row][col + 1] = 1;
-                    
-                    // Dead end branches
-                    if (Math.random() > 0.5) {
-                        maze[row - 1][col] = 1;
-                    }
-                    if (Math.random() > 0.5) {
-                        maze[row + 1][col] = 1;
+                    if (col + 1 < COLS - 2) {
+                        maze[row][col + 1] = 1;
                     }
                 }
             }
+            // Start and pursuer spawn areas will be cleared by clearArea()
         }
 
         function initializePursuers() {
